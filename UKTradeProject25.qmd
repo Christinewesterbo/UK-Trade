@@ -6,17 +6,16 @@ editor: visual
 
 **1.0 Introduction**
 
-The United Kingdom’s withdrawal from the European Union represents one of the most significant institutional and economic changes in recent decades. The Brexit referendum was held in June 2016, and the UK officially left the EU at 23:00 GMT on 31 January 2020, marking the end of nearly five decades of membership. As the EU has long been the UK’s largest trading partner, Brexit introduced new barriers to trade, altered market access conditions, and reshaped the country’s external economic relationships.
+The United Kingdom’s withdrawal from the European Union represents one of the most significant institutional and economic changes in recent decades. The Brexit referendum was held in June 2016, and the UK officially left the European Union (EU) on 31 January 2020, marking the end of nearly five decades of membership. EU has long been the UK’s largest trading partner, Brexit introduced new barriers to trade, altered market access conditions, and reshaped the country’s external economic relationships.
 
 This project aims to analyse how the UK’s trade with EU and non-EU partners has evolved before and after Brexit, with a particular focus on identifying structural shifts in trade intensity. The analysis is grounded in the gravity model of international trade, which provides data for explaining bilateral trade as a function of economic size, distance, and institutional linkages. By examining trade developments between 2010 and 2021\*, we seek to explore whether Brexit has led to changes in trading patterns
 
 **1.1 Research question**
 
-The main research question guiding this project is:
+*How has the United Kingdom’s withdrawal from the European Union affected its trade flows with EU and non-EU partners?**
 
-*"How has the United Kingdom’s withdrawal from the European Union affected its trade flows with EU and non-EU partners?*"
+The objective is to document changes in the level and composition of UK goods trade before and after Brexit.
 
-The objective is to examine changes in the volume and composition of UK trade before and after Brexit, providing insight into how this institutional shift has influenced the country’s trading relationships.\
 
 **2.0 Data collection**
 
@@ -30,7 +29,8 @@ library(dplyr)
 library(ggplot2)
 library(scales)
 library(knitr)
-
+library(tidyverse)
+library(here)
 
 
 ```
@@ -104,6 +104,10 @@ ggplot(uk_gdp, aes(x = year, y = NY.GDP.PCAP.KD)) +
   theme_minimal(base_size = 13)
 ```
 
+The first figure shows the evolution of UK real GDP per capita (constant 2015 USD) from 2000 to the present. The dashed vertical lines mark two key Brexit-related events: the 2016 referendum and the 2021 Trade and Cooperation Agreement (TCA). On its own, the UK series gives a sense of the country’s long-run income trajectory, but it does **not** tell us whether Brexit had an effect, because we cannot see how the UK would have evolved in the absence of these shocks. For that, we need a comparison group.
+
+The second figure therefore plots the cumulative change in real GDP per capita since 2010 for a set of advanced economies: Belgium, Canada, France, Germany, Italy, the Netherlands, Spain, Switzerland, and the UK. Using 2010 as a common baseline highlights how the UK’s growth path compares with peers over the same period. The same dashed lines indicate the 2016 referendum and the 2021 TCA.
+
 ```{r}
 #| label: fig-gdp-cumulative
 #| fig-cap: "Figure: Cumulative change in real GDP per capita since 2010. Dashed lines mark the 2016 Brexit referendum and 2021 Trade and Cooperation Agreement."
@@ -157,181 +161,288 @@ ggplot(dat_growth, aes(x = year, y = pct_change, group = country)) +
 
 To make the UK line appear bolder in the figure, the code first plots all countries using geom line () with lower opacity, alpha (0,4) and a moderate size. Then, added a second geom line layer that specifically filters the data for the United Kingdom (data = filter(dat_growth, country == "United Kingdom"), and plots it again with a thicker line, for a contrast effect.
 
-## Load packages ----
-
-```{r}
-library(tidyverse)
-library(dplyr)
-library(ggplot2)
-```
+From this comparative view, it becomes easier to evaluate relative performance. We can see whether the UK’s cumulative growth accelerates or decelerates around the Brexit milestones compared with countries that were not directly exposed to Brexit-related trade shocks. While all countries experience a sharp dip around 2020 due to the COVID-19 pandemic.
 
 ------------------------------------------------------------------------
 
+## Import and prepare gravity data ----
+
+
 ```{r}
-gravity <- readRDS("data/Gravity_V202211.rds") %>% 
+gravity <- readRDS(here("data", "Gravity_V202211.rds")) %>%
+select(
+year, iso3_o, iso3_d, eu_o, eu_d,
+distcap, pop_o, pop_d, gdp_o, gdp_d,
+tradeflow_comtrade_o, tradeflow_comtrade_d,
+country_exists_o, country_exists_d
+) %>%
+filter(
+(iso3_o == "GBR" | iso3_d == "GBR"),
+country_exists_o == 1 & country_exists_d == 1,
+year >= 2010, year <= 2020
+) %>%
+mutate(
+partner_eu = if_else(iso3_o == "GBR", eu_d, eu_o)
+)
+
+```
+
+
+```{r}
+# Rydd opp: fjern alt gammelt
+rm(list = ls())
+
+library(tidyverse)
+library(here)
+
+# Read gravity-data
+gravity <- readRDS(here("data", "Gravity_V202211.rds")) %>%
   select(
     year, iso3_o, iso3_d, eu_o, eu_d,
     country_exists_o, country_exists_d,
     distcap, pop_o, pop_d, gdp_o, gdp_d,
     tradeflow_comtrade_o, tradeflow_comtrade_d
-  ) %>% 
+  ) %>%
   filter(
-    iso3_o == "GBR" | iso3_d == "GBR",        # only include observations with the UK
-    country_exists_o == 1 | country_exists_d == 1,  # remove observations with non-existing countries
-    year %in% 2010:2020                       # focus on 2010–2020
+    # beholder kun rader hvor minst én av partene er UK
+    iso3_o == "GBR" | iso3_d == "GBR",
+    
+    # fjern rader der ett av landene ikke eksisterer
+    country_exists_o == 1 & country_exists_d == 1,
+    
+    # fokus 2010–2020
+    year >= 2010,
+    year <= 2020
   )
+
+# Skriv ut første rader som sjekk
+head(gravity)
+
 ```
 
-## Read and prepare data ----
 
 ------------------------------------------------------------------------
 
 ## Create UK trade subsets ----
 
 ```{r}
-# All UK exports 2010–2020
-uk_exports <- gravity %>% 
-  select(!starts_with("country_exists")) %>% 
-  filter(iso3_o == "GBR")
-
-# All UK imports 2010–2020
-uk_imports <- gravity %>% 
-  select(!starts_with("country_exists")) %>% 
-  filter(iso3_d == "GBR")
-
-# Subsets by year
-uk_exports_2010 <- uk_exports %>% filter(year == 2010)
-uk_exports_2020 <- uk_exports %>% filter(year == 2020)
-```
-
-------------------------------------------------------------------------
-
-## Data exploration ----
-
-### Simple analysis
-
-```{r}
-# Max tradeflow observation for any year
-slice_max(gravity %>% filter(iso3_d == "GBR"), tradeflow_comtrade_d) # Max import
-slice_max(gravity %>% filter(iso3_o == "GBR"), tradeflow_comtrade_o) # Max export
-
-# Average UK export to EU and non-EU countries in 2010
-uk_exports_2010 %>% 
-  group_by(eu_d) %>% 
-  summarise(
-    mean = mean(tradeflow_comtrade_o, na.rm = TRUE),
-    median = median(tradeflow_comtrade_o, na.rm = TRUE)
+gravity <- gravity %>%
+  mutate(
+    partner_eu = if_else(iso3_o == "GBR", eu_d, eu_o)  # EU-status for partnerland
   )
+
 ```
 
-------------------------------------------------------------------------
+```{r}
+uk_exports <- gravity %>% filter(iso3_o == "GBR")
+uk_imports <- gravity %>% filter(iso3_d == "GBR")
+```
 
-### Main trading partners
+
 
 ```{r}
-# Top 10 UK export destinations in 2010
-tab1 <- uk_exports_2010 %>% 
-  select(year, starts_with(c("iso3", "eu")), tradeflow_comtrade_o) %>% 
-  arrange(desc(tradeflow_comtrade_o)) %>% 
-  slice(1:10)
-
-ggplot(tab1, aes(x = iso3_d, y = tradeflow_comtrade_o)) +
-  geom_point() +
-  labs(
-    title = "Top 10 UK Export Destinations (2010)",
-    x = "Destination Country",
-    y = "Export Value"
+gravity <- readRDS(here("data", "Gravity_V202211.rds")) %>%
+  select(
+    year, iso3_o, iso3_d, eu_o, eu_d,
+    country_exists_o, country_exists_d,
+    distcap, pop_o, pop_d, gdp_o, gdp_d,
+    tradeflow_comtrade_o, tradeflow_comtrade_d
+  ) %>%
+  filter(
+    iso3_o == "GBR" | iso3_d == "GBR",
+    country_exists_o == 1 & country_exists_d == 1,
+    year >= 2010,
+    year <= 2020
+  ) %>%
+  mutate(
+    partner_eu = if_else(iso3_o == "GBR", eu_d, eu_o)
   )
+
+uk_exports <- gravity %>% filter(iso3_o == "GBR")
+uk_imports <- gravity %>% filter(iso3_d == "GBR")
+
 ```
 
-```{r}
-# Top 10 UK export destinations in 2020
-tab2 <- uk_exports_2020 %>% 
-  select(year, starts_with(c("iso3", "eu")), tradeflow_comtrade_o) %>% 
-  arrange(desc(tradeflow_comtrade_o)) %>% 
-  slice(1:10)
 
-ggplot(tab2, aes(x = iso3_d, y = tradeflow_comtrade_o)) +
-  geom_point() +
-  labs(
-    title = "Top 10 UK Export Destinations (2020)",
-    x = "Destination Country",
-    y = "Export Value"
-  )
+The row represents the single largest UK import flow in your dataset between 2010 and 2020. The variable iso3_o shows the origin country (DEU, meaning Germany) and iso3_d shows the destination country (GBR, the United Kingdom). The year variable indicates when this trade flow occurred. The import value itself is recorded in tradeflow_comtrade_d, which is the Comtrade-reported trade flow from Germany to the UK in that specific year. The variables pop_o and pop_d give the populations of the origin and destination countries, while gdp_o and gdp_d refer to their GDP levels. The variable distcap represents the distance between the countries’ capital cities, and eu_o and eu_d indicate whether the origin and destination countries were members of the EU. All of these variables together describe the economic and geographic context of this specific trade flow, allowing you to analyse not only its value but also the conditions under which it occurred.
+
+
+
+
+2.2 Import and prepare CEPII Gravity data
+
+```{r}
+gravity <- readRDS(here("data", "Gravity_V202211.rds")) %>%
+select(
+year, iso3_o, iso3_d, eu_o, eu_d,
+distcap, pop_o, pop_d, gdp_o, gdp_d,
+tradeflow_comtrade_o, tradeflow_comtrade_d,
+country_exists_o, country_exists_d
+) %>%
+filter(
+(iso3_o == "GBR" | iso3_d == "GBR"),
+country_exists_o == 1 & country_exists_d == 1,
+year >= 2010, year <= 2020
+) %>%
+mutate(
+partner_eu = if_else(iso3_o == "GBR", eu_d, eu_o)
+)
 ```
 
-## EU vs Non-EU comparison ----
+
+2.3 Create export and import datasets
+```{r}
+uk_exports <- gravity %>% filter(iso3_o == "GBR")
+uk_imports <- gravity %>% filter(iso3_d == "GBR")
+```
+
+
+3. Descriptive analysis
+3.1 UK trade with EU and non-EU partners
 
 ```{r}
-# Load helper package for side-by-side plots
-library(patchwork)
+uk_trade_eu <- gravity %>%
+group_by(year, partner_eu) %>%
+summarise(
+exports = sum(tradeflow_comtrade_o, na.rm = TRUE),
+imports = sum(tradeflow_comtrade_d, na.rm = TRUE),
+.groups = "drop"
+)
 
-# Drop missing values to avoid warnings
-uk_exports_2010_clean <- uk_exports_2010 %>% drop_na(tradeflow_comtrade_o)
-uk_exports_2020_clean <- uk_exports_2020 %>% drop_na(tradeflow_comtrade_o)
+```
 
-# Create both plots separately
-plot_2010 <- ggplot(uk_exports_2010_clean, aes(x = factor(eu_d), y = tradeflow_comtrade_o)) +
-  geom_jitter(width = 0.1, alpha = 0.7, color = "steelblue") +
+3.2 Plot: UK exports to EU vs non-EU
+
+```{r}
+ggplot(uk_trade_eu, aes(x = year, y = exports, color = factor(partner_eu))) +
+geom_line(size = 1.2) +
+geom_vline(xintercept = 2016, linetype = "dashed") +
+geom_vline(xintercept = 2020, linetype = "dashed") +
+labs(
+title = "UK Exports to EU and Non-EU Partners (2010–2020)",
+x = "Year",
+y = "Exports (USD)",
+color = "EU partner"
+) +
+scale_y_continuous(labels = scales::label_number()) +
+theme_minimal()
+
+```
+
+
+3.3 
+
+```{r}
+# 3.3 Plot: UK imports from EU vs non-EU
+
+ggplot(uk_trade_eu, aes(
+  x = year,
+  y = imports,
+  color = factor(partner_eu, labels = c("Non-EU", "EU"))
+)) +
+  geom_line(size = 1.2) +
+  geom_vline(xintercept = 2016, linetype = "dashed") +
+  geom_vline(xintercept = 2020, linetype = "dashed") +
   labs(
-    title = "UK Exports to EU vs Non-EU Countries (2010)",
-    x = "EU Membership (Destination)",
-    y = "Export Value"
+    title = "UK Imports from EU and Non-EU Partners (2010–2020)",
+    x = "Year",
+    y = "Imports (USD)",
+    color = "Partner type"
   ) +
+  scale_y_continuous(labels = scales::label_number()) +
   theme_minimal()
 
-plot_2020 <- ggplot(uk_exports_2020_clean, aes(x = factor(eu_d), y = tradeflow_comtrade_o)) +
-  geom_jitter(width = 0.1, alpha = 0.7, color = "darkred") +
-  labs(
-    title = "UK Exports to EU vs Non-EU Countries (2020)",
-    x = "EU Membership (Destination)",
-    y = "Export Value"
-  ) +
-  theme_minimal()
 
-# Display side by side
-plot_2010 + plot_2020
 ```
 
-## Further analysis ----
+The figure compares the UK’s imports from EU and non-EU partners between 2010 and 2020. Imports from EU partners are consistently higher than imports from non-EU countries throughout the period, reflecting the UK’s strong integration with the EU single market before Brexit. Both series show a dip around 2020 due to the COVID shock. There is no immediate visible drop following the 2016 referendum, but the flat or slightly declining trend after 2016 suggests that import growth from EU partners slowed relative to the pre-Brexit period.
 
-### EU vs Non-EU tradeflows (2010 vs 2020)
+3.4 EU share of UK trade
 
 ```{r}
-uk_exports %>% 
-  filter(year %in% c(2010, 2020)) %>% 
-  group_by(year, eu_d) %>% 
-  summarise(total_trade = sum(tradeflow_comtrade_o, na.rm = TRUE)) %>% 
-  ggplot(aes(x = factor(year), y = total_trade, fill = factor(eu_d))) +
-  geom_col(position = "dodge") +
-  labs(
-    title = "Total UK Exports: EU vs Non-EU (2010 vs 2020)",
-    x = "Year",
-    y = "Total Export Value",
-    fill = "EU Membership"
-  )
+eu_share <- uk_trade_eu %>%
+group_by(year) %>%
+mutate(
+total_exports = sum(exports),
+total_imports = sum(imports),
+eu_share_exports = exports[partner_eu == 1] / total_exports,
+eu_share_imports = imports[partner_eu == 1] / total_imports
+) %>%
+distinct(year, eu_share_exports, eu_share_imports)
+
 ```
 
-------------------------------------------------------------------------
-
-### UK trade with selected countries (2010–2020)
+Plot: EU Shares
 
 ```{r}
-# Focus countries
-partners <- c("GBR", "DEU", "FRA", "ITA", "ESP", "NLD", "BEL", "CHE", "CAN")
+ggplot(eu_share, aes(x = year)) +
+geom_line(aes(y = eu_share_exports, color = "Exports"), size = 1.2) +
+geom_line(aes(y = eu_share_imports, color = "Imports"), size = 1.2) +
+geom_vline(xintercept = 2016, linetype = "dashed") +
+geom_vline(xintercept = 2020, linetype = "dashed") +
+scale_y_continuous(labels = percent_format()) +
+labs(
+title = "EU Share of UK Exports and Imports",
+x = "Year",
+y = "EU share",
+color = "Flow"
+) +
+theme_minimal()
 
-uk_exports %>% 
-  filter(iso3_d %in% partners) %>% 
-  group_by(year, iso3_d) %>% 
-  summarise(total_trade = sum(tradeflow_comtrade_o, na.rm = TRUE)) %>% 
-  ggplot(aes(x = year, y = total_trade, color = iso3_d)) +
-  geom_line(linewidth = 1.2) +
-  labs(
-    title = "UK Exports to Selected Countries (2010–2020)",
-    x = "Year",
-    y = "Export Value",
-    color = "Country"
-  )
+```
+The figure shows that the EU’s share of UK exports and imports gradually declines after the 2016 referendum, with a sharper drop around 2020. This indicates that the UK becomes less dependent on EU trade over time, especially following the formal exit from the EU.
+
+
+3.5
+
+```{r}
+# 3.5 Largest UK export and import flows (2010–2020)
+
+largest_export <- uk_exports %>%
+  filter(!is.na(tradeflow_comtrade_o)) %>%
+  slice_max(tradeflow_comtrade_o, n = 1) %>%
+  select(year, iso3_d, tradeflow_comtrade_o)
+
+largest_import <- uk_imports %>%
+  filter(!is.na(tradeflow_comtrade_d)) %>%
+  slice_max(tradeflow_comtrade_d, n = 1) %>%
+  select(year, iso3_o, tradeflow_comtrade_d)
+
+kable(largest_export, caption = "Largest UK export flow (2010–2020)")
+kable(largest_import, caption = "Largest UK import flow (2010–2020)")
+
+summary(uk_exports$tradeflow_comtrade_o)
+
 ```
 
-# 
+The first table shows which country the UK exported the most to in any single year between 2010 and 2020, and the size of that export flow. The second table shows the country from which the UK imported the most in any single year over the same period. These peak flows highlight the UK’s strongest bilateral trade relationships, typically reflecting major EU partners such as Germany or the Netherlands for imports, and large markets like the United States or Germany for exports
+
+
+Regression analysis
+
+
+```{r}
+
+# 3.6 Regression analysis: EU vs non-EU trade after 2016
+
+# Prepare data
+regdata <- gravity %>%
+  mutate(
+    ln_exports = log(tradeflow_comtrade_o + 1),
+    post2016 = if_else(year >= 2016, 1, 0)
+  )
+
+# Run model
+model <- lm(ln_exports ~ partner_eu * post2016, data = regdata)
+
+# Show regression results in the knitted report
+summary(model)
+
+```
+
+
+
+
+```
+```
+
